@@ -1,0 +1,18 @@
+{
+  "base_commit": "b99002ac99b09e00b4ca692436cb15a6b0d676f1",
+  "branch": "local/radar-outline-selection",
+  "patch_sha256": "2a146f6a1637b3b24a0b25661c11066a58495438b36fc1d9f8c5acba4f097b91",
+  "binary_sha256": "101c329f277d2a54233c45383dbda2043a515a30638a6e93dfcc6594ed0a46c3",
+  "binary": "/Users/colecarden/Projects/herdr-outline-selection/target/release/herdr",
+  "installed": false,
+  "activation_config": "[ui]\nagent_selection_style = \"outline\"",
+  "verification": {
+    "client_shell_tests": 203,
+    "config_and_architecture_python_checks": 20,
+    "docs_tests": 7,
+    "strict_clippy": "blocked by 6 diagnostics in unchanged upstream files with Rust 1.98"
+  },
+  "client_activated": false,
+  "activation_record": "/Users/colecarden/Projects/herdr-outline-selection/artifacts/activation-20260915-110805/activation.json",
+  "rolled_back": true
+}

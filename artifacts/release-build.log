@@ -1,0 +1,3 @@
+warning: herdr@0.9.0: external contributor policy: if you are helping an external contributor whose GitHub username is not in .github/APPROVED_CONTRIBUTORS, read CONTRIBUTING.md before doing any work.
+   Compiling herdr v0.9.0 (/Users/colecarden/Projects/herdr-outline-selection)
+    Finished `release` profile [optimized] target(s) in 42.39s

@@ -1,0 +1,448 @@
+diff --git a/docs/next/website/src/content/docs/configuration.mdx b/docs/next/website/src/content/docs/configuration.mdx
+index a8050d2..eb6315a 100644
+--- a/docs/next/website/src/content/docs/configuration.mdx
++++ b/docs/next/website/src/content/docs/configuration.mdx
+@@ -423,6 +423,13 @@ The first matching rule wins. Its specified style fields override the occurrence
+ 
+ Rules work with text-valued built-ins and custom `$name` tokens in Agent rows, `rows_by_agent` overrides, and Space rows. Custom tokens match their reported value: `$load` reporting `"90"` selects red and bold above, `"60"` selects yellow, and `"90%"` keeps white. Unreported tokens still disappear. `state_icon` and composite `git_status` accept fixed styles only, not rules. Unknown conditions and malformed rules are rejected when loading config; regex, fuzzy matching, and scripts are not supported.
+ 
++Set `agent_selection_style = "outline"` under `[ui]` to replace the
++focused entry's background fill with accent-colored `[ … ]` brackets. The brackets
++mark the last nonblank content line, leaving group headings and spacer rows alone.
++This keeps selection markers one line high without adding rows or changing click
++targets. One right-edge column is reserved in this mode, so focus does not change
++title truncation. The default is `"fill"`. Spaces and collapsed views are unchanged.
++
+ `row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group.
+ 
+ Override the complete Agent layout for a known agent under `rows_by_agent`:
+diff --git a/docs/next/website/src/data/config-reference.json b/docs/next/website/src/data/config-reference.json
+index 444f6a1..8053f76 100644
+--- a/docs/next/website/src/data/config-reference.json
++++ b/docs/next/website/src/data/config-reference.json
+@@ -1054,6 +1054,13 @@
+           "default": "0",
+           "description": "Blank terminal rows between expanded Agent sidebar entries. Set to 1 to restore the previous spacing."
+         },
++        {
++          "key": "ui.agent_selection_style",
++          "type": "enum",
++          "default": "\"fill\"",
++          "description": "Focused expanded Agent entry treatment. Outline draws accent-colored brackets around the last nonblank content line without filling the entry or adding rows. Spaces and collapsed views are unchanged.",
++          "values": ["fill", "outline"]
++        },
+         {
+           "key": "ui.sidebar.agents.rows",
+           "type": "list of token rows",
+diff --git a/src/client/shell/agent_sidebar.rs b/src/client/shell/agent_sidebar.rs
+index d6fe335..04820ba 100644
+--- a/src/client/shell/agent_sidebar.rs
++++ b/src/client/shell/agent_sidebar.rs
+@@ -318,7 +318,8 @@ pub(super) fn render_agent_row(
+     config: &ClientShellConfig,
+ ) {
+     let palette = &config.palette;
+-    let row_style = if row.focused {
++    let outline = config.agent_selection_style == crate::config::AgentSelectionStyle::Outline;
++    let row_style = if row.focused && !outline {
+         Style::default().bg(palette.active_row_bg)
+     } else {
+         Style::default()
+@@ -354,8 +355,20 @@ pub(super) fn render_agent_row(
+     } else {
+         row.rows.clone()
+     };
++    // Select the last actual content line, not optional group headings or
++    // zero-width spacer tokens. This gives grouped plugin entries the same
++    // one-line marker without adding rows or changing their mouse hitboxes.
++    let outline_line = (outline && row.focused)
++        .then(|| {
++            rows.iter()
++                .rposition(|tokens| tokens.iter().any(|token| token.kind.has_visible_content()))
++        })
++        .flatten();
+     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
+         let indent = if index == 0 { 1 } else { 3 };
++        // Reserve the right edge on every outline-mode row so focusing an
++        // entry never changes title truncation. The left edge is existing padding.
++        let content_width = rect.width.saturating_sub(u16::from(outline));
+         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
+         spans.extend(crate::ui::resolved_token_spans(
+             tokens,
+@@ -365,12 +378,20 @@ pub(super) fn render_agent_row(
+             secondary,
+             secondary,
+             palette,
+-            rect.width.saturating_sub(indent as u16) as usize,
++            content_width.saturating_sub(indent as u16) as usize,
+         ));
+         Paragraph::new(Line::from(spans)).style(row_style).render(
+-            Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
++            Rect::new(rect.x, rect.y + index as u16, content_width, 1),
+             buffer,
+         );
++        if outline_line == Some(index) && rect.width >= 2 {
++            let y = rect.y + index as u16;
++            let style = Style::default().fg(palette.accent);
++            buffer[(rect.x, y)].set_symbol("[").set_style(style);
++            buffer[(rect.right() - 1, y)]
++                .set_symbol("]")
++                .set_style(style);
++        }
+     }
+ }
+ 
+@@ -395,3 +416,187 @@ fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str
+         AgentStatus::Idle | AgentStatus::Unknown => "idle",
+     }
+ }
++
++#[cfg(test)]
++mod outline_tests {
++    use super::*;
++    use crate::config::{AgentSelectionStyle, Config};
++    use crate::ui::{ResolvedToken, ResolvedTokenKind};
++    use ratatui::style::Color;
++
++    const BACKGROUND: Color = Color::Rgb(250, 250, 250);
++
++    fn content(text: &str) -> Vec<ResolvedToken> {
++        vec![ResolvedToken {
++            kind: ResolvedTokenKind::Custom(text.into()),
++            style: Default::default(),
++        }]
++    }
++
++    fn fixture(grouped: bool) -> AgentRow {
++        let mut rows = Vec::new();
++        if grouped {
++            rows.push(content("Hermes"));
++        }
++        rows.push(content("◉ Codex: sidebar"));
++        if grouped {
++            rows.push(content("\u{200b}"));
++        }
++        AgentRow {
++            pane_id: "fixture".into(),
++            status: crate::api::schema::AgentStatus::Working,
++            focused: true,
++            rows,
++        }
++    }
++
++    fn draw(row: &AgentRow, style: AgentSelectionStyle, rect: Rect) -> Buffer {
++        let mut config = ClientShellConfig::from_config(&Config::default());
++        config.agent_selection_style = style;
++        let mut buffer = Buffer::empty(Rect::new(0, 0, 36, 8));
++        buffer.set_style(buffer.area, Style::default().bg(BACKGROUND));
++        render_agent_row(&mut buffer, rect, row, &config);
++        buffer
++    }
++
++    #[test]
++    fn outline_config_is_opt_in_and_rejects_typos() {
++        let defaults: Config = toml::from_str("").unwrap();
++        assert_eq!(defaults.ui.agent_selection_style, AgentSelectionStyle::Fill);
++        let outline: Config = toml::from_str("[ui]\nagent_selection_style = 'outline'").unwrap();
++        assert_eq!(
++            outline.ui.agent_selection_style,
++            AgentSelectionStyle::Outline
++        );
++        assert!(toml::from_str::<Config>("[ui]\nagent_selection_style = 'outlien'").is_err());
++    }
++
++    #[test]
++    fn outline_marks_only_title_preserving_headings_spacers_and_background() {
++        for grouped in [false, true] {
++            let row = fixture(grouped);
++            let rect = Rect::new(2, 1, 30, row.rows.len() as u16);
++            let buffer = draw(&row, AgentSelectionStyle::Outline, rect);
++            let title_y = rect.y + u16::from(grouped);
++            assert_eq!(buffer[(rect.x, title_y)].symbol(), "[");
++            assert_eq!(buffer[(rect.right() - 1, title_y)].symbol(), "]");
++            let marked_rows = (rect.y..rect.bottom())
++                .filter(|y| buffer[(rect.x, *y)].symbol() == "[")
++                .count();
++            assert_eq!(marked_rows, 1);
++            assert!(buffer.content.iter().all(|cell| cell.bg == BACKGROUND));
++            if grouped {
++                assert_eq!(buffer[(rect.x + 1, rect.y)].symbol(), "H");
++                assert_eq!(buffer[(rect.x, rect.bottom() - 1)].symbol(), " ");
++            }
++            let mut idle = row;
++            idle.focused = false;
++            let unfocused = draw(&idle, AgentSelectionStyle::Outline, rect);
++            // Focusing changes only the two edge markers, not title text,
++            // token styling, or truncation. Radar tokens use the secondary style.
++            for y in rect.y..rect.bottom() {
++                for x in rect.x + 1..rect.right() - 1 {
++                    assert_eq!(buffer[(x, y)], unfocused[(x, y)]);
++                }
++            }
++        }
++    }
++
++    #[test]
++    fn outline_respects_narrow_clipped_and_unicode_rows() {
++        let mut row = fixture(true);
++        row.rows[1] = content("界界界界界界界界界界");
++        for width in 0..=30 {
++            let rect = Rect::new(2, 1, width, 3);
++            let buffer = draw(&row, AgentSelectionStyle::Outline, rect);
++            assert!(buffer.content.iter().all(|cell| cell.bg == BACKGROUND));
++            if width >= 2 {
++                assert_eq!(buffer[(rect.right() - 1, rect.y + 1)].symbol(), "]");
++            }
++            assert_eq!(buffer[(rect.right(), rect.y + 1)].symbol(), " ");
++        }
++        // A clipped title must not cause its heading to appear selected.
++        let buffer = draw(&row, AgentSelectionStyle::Outline, Rect::new(2, 1, 30, 1));
++        assert!(!buffer.content.iter().any(|cell| cell.symbol() == "["));
++    }
++
++    #[test]
++    fn default_fill_still_covers_the_whole_entry() {
++        let row = fixture(true);
++        let rect = Rect::new(2, 1, 30, 3);
++        let buffer = draw(&row, AgentSelectionStyle::Fill, rect);
++        let palette = ClientShellConfig::from_config(&Config::default()).palette;
++        for y in rect.y..rect.bottom() {
++            for x in rect.x..rect.right() {
++                assert_eq!(buffer[(x, y)].bg, palette.active_row_bg);
++            }
++        }
++    }
++
++    #[test]
++    #[ignore = "manual render artifact and non-gating scaling profile"]
++    fn outline_selection_preview_and_scale() {
++        for style in [AgentSelectionStyle::Fill, AgentSelectionStyle::Outline] {
++            let mut row = fixture(true);
++            row.rows[0][0].style.fg = Some(serde_json::from_str("\"#7c7f93\"").unwrap());
++            row.rows[0][0].style.bold = Some(true);
++            row.rows[0][0].style.dim = Some(false);
++            row.rows[1][0].style.fg = Some(serde_json::from_str("\"#c78a1f\"").unwrap());
++            row.rows[1][0].style.bold = Some(true);
++            row.rows[1][0].style.dim = Some(false);
++            let mut config = Config::default();
++            config.theme.name = Some("catppuccin-latte".into());
++            config.ui.agent_selection_style = style;
++            let mut shell_config = ClientShellConfig::from_config(&config);
++            shell_config.palette.active_row_bg = Color::Rgb(185, 205, 242);
++            let mut buffer = Buffer::empty(Rect::new(0, 0, 36, 6));
++            buffer.set_style(buffer.area, Style::default().bg(BACKGROUND));
++            render_agent_row(&mut buffer, Rect::new(2, 1, 30, 3), &row, &shell_config);
++            let cells = buffer
++                .content
++                .iter()
++                .map(|cell| {
++                    serde_json::json!({"text":cell.symbol(), "fg":format!("{:?}", cell.fg),
++                    "bg":format!("{:?}", cell.bg), "modifier":format!("{:?}", cell.modifier)})
++                })
++                .collect::<Vec<_>>();
++            println!(
++                "OUTLINE_PREVIEW {}",
++                serde_json::json!({"style":format!("{style:?}"),
++                "width":buffer.area.width, "height":buffer.area.height, "cells":cells})
++            );
++        }
++        // Fixed 36-column geometry with one focused agent, matching a sidebar.
++        // Measure only the rendering loop; fixture construction is outside it.
++        for count in [1, 15] {
++            for style in [AgentSelectionStyle::Fill, AgentSelectionStyle::Outline] {
++                let mut config = ClientShellConfig::from_config(&Config::default());
++                config.agent_selection_style = style;
++                let rows = (0..count)
++                    .map(|index| {
++                        let mut row = fixture(index % 3 == 0);
++                        row.focused = index == 0;
++                        row
++                    })
++                    .collect::<Vec<_>>();
++                let mut buffer = Buffer::empty(Rect::new(0, 0, 36, 60));
++                let start = std::time::Instant::now();
++                for _ in 0..2000 {
++                    for (index, row) in rows.iter().enumerate() {
++                        render_agent_row(
++                            &mut buffer,
++                            Rect::new(0, (index * 4) as u16, 36, 3),
++                            row,
++                            &config,
++                        );
++                    }
++                    std::hint::black_box(&buffer);
++                }
++                println!(
++                    "OUTLINE_SCALE agents={count} style={style:?} us_per_frame={:.2}",
++                    start.elapsed().as_secs_f64() * 1_000_000.0 / 2000.0
++                );
++            }
++        }
++    }
++}
+diff --git a/src/client/shell/config.rs b/src/client/shell/config.rs
+index e8a9b4b..8c38416 100644
+--- a/src/client/shell/config.rs
++++ b/src/client/shell/config.rs
+@@ -107,6 +107,7 @@ impl ClientShellConfig {
+             spaces: config.ui.sidebar.spaces.clone(),
+             agents: config.ui.sidebar.agents.clone(),
+             agent_panel_sort: config.ui.agent_panel_sort,
++            agent_selection_style: config.ui.agent_selection_style,
+             status_indicators: config.ui.status_indicators,
+             sound_enabled: config.ui.sound.enabled,
+             toast_delivery: config.ui.toast.delivery,
+@@ -309,6 +310,7 @@ impl ClientShellConfig {
+                 self.spaces = ui.sidebar.spaces.clone();
+                 self.agents = ui.sidebar.agents.clone();
+                 self.agent_panel_sort = ui.agent_panel_sort;
++                self.agent_selection_style = ui.agent_selection_style;
+                 self.status_indicators = ui.status_indicators;
+                 self.sound_enabled = ui.sound.enabled;
+                 self.toast_delivery = ui.toast.delivery;
+@@ -442,6 +444,7 @@ mod tests {
+         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+         next.ui.sidebar.agents = toml::from_str("rows = [[{ token = 'machine', rules = [{ equals = 'Local', bold = true }] }]]\nrow_gap = 2").unwrap();
++        next.ui.agent_selection_style = crate::config::AgentSelectionStyle::Outline;
+         next.keys.prefix = "ctrl+a".to_owned();
+ 
+         let diagnostics = shell.apply_live_config(&next, &[], &[]);
+@@ -458,6 +461,10 @@ mod tests {
+             crate::config::StatusIndicatorStyle::Symbols
+         );
+         assert_eq!(shell.agents.row_gap, 2);
++        assert_eq!(
++            shell.agent_selection_style,
++            crate::config::AgentSelectionStyle::Outline
++        );
+         assert_eq!(
+             shell.agents.rows[0][0].style_for_value("Local").bold,
+             Some(true)
+diff --git a/src/client/shell/state.rs b/src/client/shell/state.rs
+index 81845d3..2298340 100644
+--- a/src/client/shell/state.rs
++++ b/src/client/shell/state.rs
+@@ -80,6 +80,7 @@ pub(crate) struct ClientShellConfig {
+     pub(super) spaces: SpacesSidebarConfig,
+     pub(super) agents: crate::config::AgentsSidebarConfig,
+     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
++    pub(super) agent_selection_style: crate::config::AgentSelectionStyle,
+     pub(super) status_indicators: crate::config::StatusIndicatorStyle,
+     pub(super) sound_enabled: bool,
+     pub(super) toast_delivery: crate::config::ToastDelivery,
+diff --git a/src/client/shell/tests/agents_worktrees_notifications.rs b/src/client/shell/tests/agents_worktrees_notifications.rs
+index 10f9711..47ed778 100644
+--- a/src/client/shell/tests/agents_worktrees_notifications.rs
++++ b/src/client/shell/tests/agents_worktrees_notifications.rs
+@@ -431,6 +431,15 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
+ 
+ #[test]
+ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
++    check_agent_sidebar_hits(crate::config::AgentSelectionStyle::Fill);
++}
++
++#[test]
++fn outline_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
++    check_agent_sidebar_hits(crate::config::AgentSelectionStyle::Outline);
++}
++
++fn check_agent_sidebar_hits(selection_style: crate::config::AgentSelectionStyle) {
+     let mut projected = snapshot();
+     let mut second_pane = projected.panes[0].clone();
+     second_pane.pane_id = "pane_2".into();
+@@ -471,6 +480,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
+         },
+     ];
+     let mut config = Config::default();
++    config.ui.agent_selection_style = selection_style;
+     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
+     config.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+     config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];
+diff --git a/src/config.rs b/src/config.rs
+index 60a22a1..99b9d87 100644
+--- a/src/config.rs
++++ b/src/config.rs
+@@ -29,8 +29,8 @@ pub use self::{
+         UpdateChannelConfig, MAX_TOAST_DELAY_SECONDS,
+     },
+     sidebar::{
+-        AgentSidebarToken, AgentsSidebarConfig, SidebarConfig, SidebarTokenStyle,
+-        SpaceSidebarToken, SpacesSidebarConfig,
++        AgentSelectionStyle, AgentSidebarToken, AgentsSidebarConfig, SidebarConfig,
++        SidebarTokenStyle, SpaceSidebarToken, SpacesSidebarConfig,
+     },
+     sound::SoundConfig,
+     tab_bar::TabBarRightEntryConfig,
+diff --git a/src/config/model.rs b/src/config/model.rs
+index 604fe9a..79aec62 100644
+--- a/src/config/model.rs
++++ b/src/config/model.rs
+@@ -957,6 +957,7 @@ pub struct UiConfig {
+     pub window_title: String,
+     /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
+     pub agent_panel_sort: AgentPanelSortConfig,
++    pub agent_selection_style: super::AgentSelectionStyle,
+     /// Retired setting that Herdr wrote before the workspace filter was removed.
+     #[serde(rename = "agent_panel_scope")]
+     _legacy_agent_panel_scope: Option<LegacyAgentPanelScopeConfig>,
+@@ -1184,6 +1185,7 @@ impl Default for UiConfig {
+             tab_bar_right_separator: " ".into(),
+             window_title: super::window_title::default_window_title(),
+             agent_panel_sort: AgentPanelSortConfig::Spaces,
++            agent_selection_style: super::AgentSelectionStyle::default(),
+             _legacy_agent_panel_scope: None,
+             status_indicators: StatusIndicatorStyle::Dots,
+             sidebar: SidebarConfig::default(),
+diff --git a/src/config/sidebar.rs b/src/config/sidebar.rs
+index 0b48976..09a9459 100644
+--- a/src/config/sidebar.rs
++++ b/src/config/sidebar.rs
+@@ -419,6 +419,14 @@ where
+     Ok(rows_by_agent)
+ }
+ 
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
++#[serde(rename_all = "snake_case")]
++pub enum AgentSelectionStyle {
++    #[default]
++    Fill,
++    Outline,
++}
++
+ #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+ #[serde(default)]
+ pub struct AgentsSidebarConfig {
+diff --git a/src/main.rs b/src/main.rs
+index cf7cf5b..1e84d4e 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -329,6 +329,9 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
+ # "workspaces" is accepted as an alias for "spaces".
+ # agent_panel_sort = "spaces"
+ 
++# Expanded agent focus: "fill" or "outline" (brackets on the last nonblank line).
++# agent_selection_style = "fill"
++
+ # Agent status indicators: "dots" preserves the compact color marks; "symbols" uses
+ # distinct static glyphs for blocked, working, done, idle, and unknown states.
+ # status_indicators = "dots"
+diff --git a/src/ui/sidebar/tokens.rs b/src/ui/sidebar/tokens.rs
+index d9cefe9..e18f780 100644
+--- a/src/ui/sidebar/tokens.rs
++++ b/src/ui/sidebar/tokens.rs
+@@ -25,6 +25,14 @@ pub(crate) enum ResolvedTokenKind {
+ }
+ 
+ impl ResolvedTokenKind {
++    pub(crate) fn has_visible_content(&self) -> bool {
++        self.text_value().is_none_or(|value| {
++            value.chars().any(|ch| {
++                !ch.is_whitespace() && unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) > 0
++            })
++        })
++    }
++
+     fn text_value(&self) -> Option<&str> {
+         match self {
+             Self::StateText(value)

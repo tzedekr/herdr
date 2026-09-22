@@ -423,6 +423,13 @@ The first matching rule wins. Its specified style fields override the occurrence
 
 Rules work with text-valued built-ins and custom `$name` tokens in Agent rows, `rows_by_agent` overrides, and Space rows. Custom tokens match their reported value: `$load` reporting `"90"` selects red and bold above, `"60"` selects yellow, and `"90%"` keeps white. Unreported tokens still disappear. `state_icon` and composite `git_status` accept fixed styles only, not rules. Unknown conditions and malformed rules are rejected when loading config; regex, fuzzy matching, and scripts are not supported.
 
+Set `agent_selection_style = "outline"` under `[ui]` to replace the
+focused entry's background fill with accent-colored `[ … ]` brackets. The brackets
+mark the last nonblank content line, leaving group headings and spacer rows alone.
+This keeps selection markers one line high without adding rows or changing click
+targets. One right-edge column is reserved in this mode, so focus does not change
+title truncation. The default is `"fill"`. Spaces and collapsed views are unchanged.
+
 `row_gap` controls the blank terminal rows between entries, independently for the Agent and Space panels. It defaults to `0`, which packs entries together; set it to `1` to restore the previous spacing. It does not add spacing between the content lines declared in `rows`. Consecutive indented worktree children remain packed as one Space group.
 
 Override the complete Agent layout for a known agent under `rows_by_agent`:

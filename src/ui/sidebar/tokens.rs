@@ -25,6 +25,14 @@ pub(crate) enum ResolvedTokenKind {
 }
 
 impl ResolvedTokenKind {
+    pub(crate) fn has_visible_content(&self) -> bool {
+        self.text_value().is_none_or(|value| {
+            value.chars().any(|ch| {
+                !ch.is_whitespace() && unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0) > 0
+            })
+        })
+    }
+
     fn text_value(&self) -> Option<&str> {
         match self {
             Self::StateText(value)
@@ -177,13 +185,35 @@ pub(crate) fn space_rows(
         .collect()
 }
 
-pub(crate) fn separator(previous: &ResolvedToken, current: &ResolvedToken) -> &'static str {
+pub(crate) fn separator(
+    previous: &ResolvedToken,
+    current: &ResolvedToken,
+    compact: bool,
+) -> &'static str {
     if matches!(previous.kind, ResolvedTokenKind::StateIcon)
         || matches!(current.kind, ResolvedTokenKind::GitStatus { .. })
     {
         " "
+    } else if compact {
+        "·"
     } else {
         " · "
+    }
+}
+
+#[cfg(test)]
+mod separator_tests {
+    use super::*;
+
+    #[test]
+    fn compact_agent_separator_packs_radar_cells_without_touching_status_spacing() {
+        let logo = ResolvedToken::unstyled(ResolvedTokenKind::Custom("◉".into()));
+        let title = ResolvedToken::unstyled(ResolvedTokenKind::Custom("⠿ Hermes".into()));
+        let state = ResolvedToken::unstyled(ResolvedTokenKind::StateIcon);
+
+        assert_eq!(separator(&logo, &title, true), "·");
+        assert_eq!(separator(&logo, &title, false), " · ");
+        assert_eq!(separator(&state, &title, true), " ");
     }
 }
 
@@ -282,6 +312,7 @@ rows = [[{ token = "workspace", rules = [{ equals = "long-workspace-name", fg = 
                 theme,
                 theme,
                 &super::super::Palette::catppuccin(),
+                false,
                 width,
             );
             assert_eq!(spans.len(), 1);

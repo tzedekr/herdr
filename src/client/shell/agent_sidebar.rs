@@ -318,7 +318,8 @@ pub(super) fn render_agent_row(
     config: &ClientShellConfig,
 ) {
     let palette = &config.palette;
-    let row_style = if row.focused {
+    let outline = config.agent_selection_style == crate::config::AgentSelectionStyle::Outline;
+    let row_style = if row.focused && !outline {
         Style::default().bg(palette.active_row_bg)
     } else {
         Style::default()
@@ -354,8 +355,20 @@ pub(super) fn render_agent_row(
     } else {
         row.rows.clone()
     };
+    // Select the last actual content line, not optional group headings or
+    // zero-width spacer tokens. This gives grouped plugin entries the same
+    // one-line marker without adding rows or changing their mouse hitboxes.
+    let outline_line = (outline && row.focused)
+        .then(|| {
+            rows.iter()
+                .rposition(|tokens| tokens.iter().any(|token| token.kind.has_visible_content()))
+        })
+        .flatten();
     for (index, tokens) in rows.iter().take(rect.height as usize).enumerate() {
         let indent = if index == 0 { 1 } else { 3 };
+        // Reserve the right edge on every outline-mode row so focusing an
+        // entry never changes title truncation. The left edge is existing padding.
+        let content_width = rect.width.saturating_sub(u16::from(outline));
         let mut spans = vec![ratatui::text::Span::raw(" ".repeat(indent))];
         spans.extend(crate::ui::resolved_token_spans(
             tokens,
@@ -365,12 +378,21 @@ pub(super) fn render_agent_row(
             secondary,
             secondary,
             palette,
-            rect.width.saturating_sub(indent as u16) as usize,
+            true,
+            content_width.saturating_sub(indent as u16) as usize,
         ));
         Paragraph::new(Line::from(spans)).style(row_style).render(
-            Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
+            Rect::new(rect.x, rect.y + index as u16, content_width, 1),
             buffer,
         );
+        if outline_line == Some(index) && rect.width >= 2 {
+            let y = rect.y + index as u16;
+            let style = Style::default().fg(palette.accent);
+            buffer[(rect.x, y)].set_symbol("[").set_style(style);
+            buffer[(rect.right() - 1, y)]
+                .set_symbol("]")
+                .set_style(style);
+        }
     }
 }
 
@@ -393,5 +415,189 @@ fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str 
         AgentStatus::Done => "done",
         AgentStatus::Working => "working",
         AgentStatus::Idle | AgentStatus::Unknown => "idle",
+    }
+}
+
+#[cfg(test)]
+mod outline_tests {
+    use super::*;
+    use crate::config::{AgentSelectionStyle, Config};
+    use crate::ui::{ResolvedToken, ResolvedTokenKind};
+    use ratatui::style::Color;
+
+    const BACKGROUND: Color = Color::Rgb(250, 250, 250);
+
+    fn content(text: &str) -> Vec<ResolvedToken> {
+        vec![ResolvedToken {
+            kind: ResolvedTokenKind::Custom(text.into()),
+            style: Default::default(),
+        }]
+    }
+
+    fn fixture(grouped: bool) -> AgentRow {
+        let mut rows = Vec::new();
+        if grouped {
+            rows.push(content("Hermes"));
+        }
+        rows.push(content("◉ Codex: sidebar"));
+        if grouped {
+            rows.push(content("\u{200b}"));
+        }
+        AgentRow {
+            pane_id: "fixture".into(),
+            status: crate::api::schema::AgentStatus::Working,
+            focused: true,
+            rows,
+        }
+    }
+
+    fn draw(row: &AgentRow, style: AgentSelectionStyle, rect: Rect) -> Buffer {
+        let mut config = ClientShellConfig::from_config(&Config::default());
+        config.agent_selection_style = style;
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 36, 8));
+        buffer.set_style(buffer.area, Style::default().bg(BACKGROUND));
+        render_agent_row(&mut buffer, rect, row, &config);
+        buffer
+    }
+
+    #[test]
+    fn outline_config_is_opt_in_and_rejects_typos() {
+        let defaults: Config = toml::from_str("").unwrap();
+        assert_eq!(defaults.ui.agent_selection_style, AgentSelectionStyle::Fill);
+        let outline: Config = toml::from_str("[ui]\nagent_selection_style = 'outline'").unwrap();
+        assert_eq!(
+            outline.ui.agent_selection_style,
+            AgentSelectionStyle::Outline
+        );
+        assert!(toml::from_str::<Config>("[ui]\nagent_selection_style = 'outlien'").is_err());
+    }
+
+    #[test]
+    fn outline_marks_only_title_preserving_headings_spacers_and_background() {
+        for grouped in [false, true] {
+            let row = fixture(grouped);
+            let rect = Rect::new(2, 1, 30, row.rows.len() as u16);
+            let buffer = draw(&row, AgentSelectionStyle::Outline, rect);
+            let title_y = rect.y + u16::from(grouped);
+            assert_eq!(buffer[(rect.x, title_y)].symbol(), "[");
+            assert_eq!(buffer[(rect.right() - 1, title_y)].symbol(), "]");
+            let marked_rows = (rect.y..rect.bottom())
+                .filter(|y| buffer[(rect.x, *y)].symbol() == "[")
+                .count();
+            assert_eq!(marked_rows, 1);
+            assert!(buffer.content.iter().all(|cell| cell.bg == BACKGROUND));
+            if grouped {
+                assert_eq!(buffer[(rect.x + 1, rect.y)].symbol(), "H");
+                assert_eq!(buffer[(rect.x, rect.bottom() - 1)].symbol(), " ");
+            }
+            let mut idle = row;
+            idle.focused = false;
+            let unfocused = draw(&idle, AgentSelectionStyle::Outline, rect);
+            // Focusing changes only the two edge markers, not title text,
+            // token styling, or truncation. Radar tokens use the secondary style.
+            for y in rect.y..rect.bottom() {
+                for x in rect.x + 1..rect.right() - 1 {
+                    assert_eq!(buffer[(x, y)], unfocused[(x, y)]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn outline_respects_narrow_clipped_and_unicode_rows() {
+        let mut row = fixture(true);
+        row.rows[1] = content("界界界界界界界界界界");
+        for width in 0..=30 {
+            let rect = Rect::new(2, 1, width, 3);
+            let buffer = draw(&row, AgentSelectionStyle::Outline, rect);
+            assert!(buffer.content.iter().all(|cell| cell.bg == BACKGROUND));
+            if width >= 2 {
+                assert_eq!(buffer[(rect.right() - 1, rect.y + 1)].symbol(), "]");
+            }
+            assert_eq!(buffer[(rect.right(), rect.y + 1)].symbol(), " ");
+        }
+        // A clipped title must not cause its heading to appear selected.
+        let buffer = draw(&row, AgentSelectionStyle::Outline, Rect::new(2, 1, 30, 1));
+        assert!(!buffer.content.iter().any(|cell| cell.symbol() == "["));
+    }
+
+    #[test]
+    fn default_fill_still_covers_the_whole_entry() {
+        let row = fixture(true);
+        let rect = Rect::new(2, 1, 30, 3);
+        let buffer = draw(&row, AgentSelectionStyle::Fill, rect);
+        let palette = ClientShellConfig::from_config(&Config::default()).palette;
+        for y in rect.y..rect.bottom() {
+            for x in rect.x..rect.right() {
+                assert_eq!(buffer[(x, y)].bg, palette.active_row_bg);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "manual render artifact and non-gating scaling profile"]
+    fn outline_selection_preview_and_scale() {
+        for style in [AgentSelectionStyle::Fill, AgentSelectionStyle::Outline] {
+            let mut row = fixture(true);
+            row.rows[0][0].style.fg = Some(serde_json::from_str("\"#7c7f93\"").unwrap());
+            row.rows[0][0].style.bold = Some(true);
+            row.rows[0][0].style.dim = Some(false);
+            row.rows[1][0].style.fg = Some(serde_json::from_str("\"#c78a1f\"").unwrap());
+            row.rows[1][0].style.bold = Some(true);
+            row.rows[1][0].style.dim = Some(false);
+            let mut config = Config::default();
+            config.theme.name = Some("catppuccin-latte".into());
+            config.ui.agent_selection_style = style;
+            let mut shell_config = ClientShellConfig::from_config(&config);
+            shell_config.palette.active_row_bg = Color::Rgb(185, 205, 242);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 36, 6));
+            buffer.set_style(buffer.area, Style::default().bg(BACKGROUND));
+            render_agent_row(&mut buffer, Rect::new(2, 1, 30, 3), &row, &shell_config);
+            let cells = buffer
+                .content
+                .iter()
+                .map(|cell| {
+                    serde_json::json!({"text":cell.symbol(), "fg":format!("{:?}", cell.fg),
+                    "bg":format!("{:?}", cell.bg), "modifier":format!("{:?}", cell.modifier)})
+                })
+                .collect::<Vec<_>>();
+            println!(
+                "OUTLINE_PREVIEW {}",
+                serde_json::json!({"style":format!("{style:?}"),
+                "width":buffer.area.width, "height":buffer.area.height, "cells":cells})
+            );
+        }
+        // Fixed 36-column geometry with one focused agent, matching a sidebar.
+        // Measure only the rendering loop; fixture construction is outside it.
+        for count in [1, 15] {
+            for style in [AgentSelectionStyle::Fill, AgentSelectionStyle::Outline] {
+                let mut config = ClientShellConfig::from_config(&Config::default());
+                config.agent_selection_style = style;
+                let rows = (0..count)
+                    .map(|index| {
+                        let mut row = fixture(index % 3 == 0);
+                        row.focused = index == 0;
+                        row
+                    })
+                    .collect::<Vec<_>>();
+                let mut buffer = Buffer::empty(Rect::new(0, 0, 36, 60));
+                let start = std::time::Instant::now();
+                for _ in 0..2000 {
+                    for (index, row) in rows.iter().enumerate() {
+                        render_agent_row(
+                            &mut buffer,
+                            Rect::new(0, (index * 4) as u16, 36, 3),
+                            row,
+                            &config,
+                        );
+                    }
+                    std::hint::black_box(&buffer);
+                }
+                println!(
+                    "OUTLINE_SCALE agents={count} style={style:?} us_per_frame={:.2}",
+                    start.elapsed().as_secs_f64() * 1_000_000.0 / 2000.0
+                );
+            }
+        }
     }
 }

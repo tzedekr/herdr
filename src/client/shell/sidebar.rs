@@ -686,6 +686,7 @@ pub(in crate::client::shell) fn render_workspace_rows(
             secondary_style,
             Style::default().fg(palette.overlay1),
             palette,
+            false,
             area.right().saturating_sub(2).saturating_sub(x) as usize,
         );
         Paragraph::new(Line::from(spans)).render(

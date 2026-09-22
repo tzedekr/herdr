@@ -431,6 +431,15 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
 
 #[test]
 fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
+    check_agent_sidebar_hits(crate::config::AgentSelectionStyle::Fill);
+}
+
+#[test]
+fn outline_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
+    check_agent_sidebar_hits(crate::config::AgentSelectionStyle::Outline);
+}
+
+fn check_agent_sidebar_hits(selection_style: crate::config::AgentSelectionStyle) {
     let mut projected = snapshot();
     let mut second_pane = projected.panes[0].clone();
     second_pane.pane_id = "pane_2".into();
@@ -471,6 +480,7 @@ fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
         },
     ];
     let mut config = Config::default();
+    config.ui.agent_selection_style = selection_style;
     config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
     config.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
     config.ui.sidebar.agents.rows = vec![vec![crate::config::AgentSidebarToken::Agent]];

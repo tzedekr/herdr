@@ -1,0 +1,86 @@
+warning: herdr@0.9.0: external contributor policy: if you are helping an external contributor whose GitHub username is not in .github/APPROVED_CONTRIBUTORS, read CONTRIBUTING.md before doing any work.
+    Finished `release` profile [optimized] target(s) in 0.22s
+     Running unittests src/main.rs (target/release/deps/herdr-7972b235a9a7bfac)
+
+running 2 tests
+test server::headless::tests::pane_graphics_tests::render_scale_profile_retained_graphics ... retained=false 80x24 panes=1 image=false median_us=186 p95_us=199
+retained=false 80x24 panes=15 image=false median_us=224 p95_us=240
+retained=false 80x24 panes=1 image=true median_us=187 p95_us=201
+retained=false 80x24 panes=15 image=true median_us=233 p95_us=240
+retained=true 80x24 panes=1 image=false median_us=33 p95_us=36
+retained=true 80x24 panes=15 image=false median_us=54 p95_us=58
+retained=true 80x24 panes=1 image=true median_us=72 p95_us=79
+retained=true 80x24 panes=15 image=true median_us=101 p95_us=121
+ok
+test server::render_scale_benchmark::render_scale_profile ... background workspaces (one pane each)
+  server pane surface
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        255     279     294          1.00       1.00
+          15        253     271     295          0.99       0.97
+          50        258     279     300          1.01       1.00
+  client shell composition
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        153     174     184          1.00       1.00
+          15        165     188     200          1.08       1.08
+          50        173     202     224          1.13       1.16
+  combined pipeline
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        405     447     472          1.00       1.00
+          15        414     447     496          1.02       1.00
+          50        432     463     524          1.07       1.04
+background workspaces snapshot projection + JSON framing
+       panes  clients  median_us  p95_us  max_us
+           1        1          6       7      23
+           1        4         23      26      26
+          15        1         22      23      25
+          15        4         62      72      75
+          50        1         63      66      90
+          50        4        143     165     181
+active panes (one workspace)
+  server pane surface
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        263     280     369          1.00       1.00
+          15        296     355     362          1.13       1.27
+          50        373     417     465          1.42       1.49
+  client shell composition
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        151     170     230          1.00       1.00
+          15        149     174     197          0.99       1.02
+          50        154     186     191          1.02       1.09
+  combined pipeline
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        416     466     522          1.00       1.00
+          15        441     528     559          1.06       1.13
+          50        528     604     623          1.27       1.30
+active panes snapshot projection + JSON framing
+       panes  clients  median_us  p95_us  max_us
+           1        1          6       6       7
+           1        4         23      23      23
+          15        1          9       9       9
+          15        4         27      30      33
+          50        1         23      26      28
+          50        4         37      38      40
+token rules background: populated agents, rules_per_token=0
+  client shell composition
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        151     180     224          1.00       1.00
+          15        175     192     206          1.16       1.07
+token rules background: populated agents, rules_per_token=16
+  client shell composition
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        153     163     173          1.00       1.00
+          15        182     192     199          1.19       1.18
+token rules active: populated agents, rules_per_token=0
+  client shell composition
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        145     164     186          1.00       1.00
+          15        167     199     217          1.15       1.21
+token rules active: populated agents, rules_per_token=16
+  client shell composition
+       count  median_us  p95_us  max_us  median_vs_1x  p95_vs_1x
+           1        155     172     175          1.00       1.00
+          15        169     189     227          1.09       1.10
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 3005 filtered out; finished in 0.65s
+

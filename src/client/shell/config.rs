@@ -107,6 +107,7 @@ impl ClientShellConfig {
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
+            agent_selection_style: config.ui.agent_selection_style,
             status_indicators: config.ui.status_indicators,
             sound_enabled: config.ui.sound.enabled,
             toast_delivery: config.ui.toast.delivery,
@@ -309,6 +310,7 @@ impl ClientShellConfig {
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
+                self.agent_selection_style = ui.agent_selection_style;
                 self.status_indicators = ui.status_indicators;
                 self.sound_enabled = ui.sound.enabled;
                 self.toast_delivery = ui.toast.delivery;
@@ -442,6 +444,7 @@ mod tests {
         next.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
         next.ui.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
         next.ui.sidebar.agents = toml::from_str("rows = [[{ token = 'machine', rules = [{ equals = 'Local', bold = true }] }]]\nrow_gap = 2").unwrap();
+        next.ui.agent_selection_style = crate::config::AgentSelectionStyle::Outline;
         next.keys.prefix = "ctrl+a".to_owned();
 
         let diagnostics = shell.apply_live_config(&next, &[], &[]);
@@ -458,6 +461,10 @@ mod tests {
             crate::config::StatusIndicatorStyle::Symbols
         );
         assert_eq!(shell.agents.row_gap, 2);
+        assert_eq!(
+            shell.agent_selection_style,
+            crate::config::AgentSelectionStyle::Outline
+        );
         assert_eq!(
             shell.agents.rows[0][0].style_for_value("Local").bold,
             Some(true)

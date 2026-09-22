@@ -1055,6 +1055,13 @@
           "description": "Blank terminal rows between expanded Agent sidebar entries. Set to 1 to restore the previous spacing."
         },
         {
+          "key": "ui.agent_selection_style",
+          "type": "enum",
+          "default": "\"fill\"",
+          "description": "Focused expanded Agent entry treatment. Outline draws accent-colored brackets around the last nonblank content line without filling the entry or adding rows. Spaces and collapsed views are unchanged.",
+          "values": ["fill", "outline"]
+        },
+        {
           "key": "ui.sidebar.agents.rows",
           "type": "list of token rows",
           "default": "[[\"state_icon\", \"machine\", \"workspace\", \"tab\"], [\"agent\"]]",
