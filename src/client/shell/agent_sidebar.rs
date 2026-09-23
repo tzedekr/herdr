@@ -370,6 +370,16 @@ pub(super) fn render_agent_row(
             Rect::new(rect.x, rect.y + index as u16, rect.width, 1),
             buffer,
         );
+        if row.focused {
+            let foreground = crate::ui::selection_fg_for_bg(palette.active_row_bg, palette);
+            for x in rect.x..rect.right() {
+                buffer[(x, rect.y + index as u16)].set_style(
+                    Style::default()
+                        .fg(foreground)
+                        .remove_modifier(Modifier::DIM),
+                );
+            }
+        }
     }
 }
 

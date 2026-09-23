@@ -430,6 +430,51 @@ fn pane_cycle_last_and_agent_actions_resolve_to_stable_pane_ids() {
 }
 
 #[test]
+fn focused_agent_row_contrasts_with_highlight_without_dimming_text() {
+    use ratatui::{
+        buffer::Buffer,
+        layout::Rect,
+        style::{Color, Modifier},
+    };
+
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.palette = Palette::catppuccin_latte();
+    let mut row = super::agent_sidebar::AgentRow {
+        pane_id: "pane_1".into(),
+        status: AgentStatus::Done,
+        focused: true,
+        rows: vec![vec![crate::ui::ResolvedToken {
+            kind: crate::ui::ResolvedTokenKind::Agent("Research Virgil Gamache".into()),
+            style: crate::config::SidebarTokenStyle {
+                dim: Some(true),
+                ..Default::default()
+            },
+        }]],
+    };
+    let rect = Rect::new(0, 0, 36, 1);
+    for (background, foreground) in [
+        (Color::Rgb(31, 30, 45), Color::Rgb(255, 255, 255)),
+        (Color::Rgb(230, 233, 239), Color::Rgb(0, 0, 0)),
+    ] {
+        config.palette.active_row_bg = background;
+        let mut buffer = Buffer::empty(rect);
+        super::agent_sidebar::render_agent_row(&mut buffer, rect, &row, &config);
+        let cell = &buffer[(2, 0)];
+        assert_eq!(cell.symbol(), "e");
+        assert_eq!(cell.bg, background);
+        assert_eq!(cell.fg, foreground);
+        assert!(!cell.modifier.contains(Modifier::DIM));
+    }
+
+    row.focused = false;
+    let mut buffer = Buffer::empty(rect);
+    super::agent_sidebar::render_agent_row(&mut buffer, rect, &row, &config);
+    let cell = &buffer[(2, 0)];
+    assert_eq!(cell.fg, config.palette.overlay0);
+    assert!(cell.modifier.contains(Modifier::DIM));
+}
+
+#[test]
 fn agent_sidebar_honors_priority_symbols_tokens_and_stable_hits() {
     let mut projected = snapshot();
     let mut second_pane = projected.panes[0].clone();
