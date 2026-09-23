@@ -172,6 +172,12 @@ pub(super) fn render_collapsed(
                     })
                     .add_modifier(dim),
             );
+            if selected {
+                let foreground = crate::ui::selection_fg_for_bg(selection_background, palette);
+                for x in rect.x..rect.right() {
+                    buffer[(x, rect.y)].set_fg(foreground);
+                }
+            }
             hits.workspaces.push(WorkspaceHit {
                 rect,
                 endpoint_id: endpoint.endpoint_id.clone(),

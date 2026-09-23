@@ -770,7 +770,7 @@ fn selection_palette_background(p: &Palette) -> Color {
     }
 }
 
-fn selection_fg_for_bg(bg: Color, p: &Palette) -> Color {
+pub(crate) fn selection_fg_for_bg(bg: Color, p: &Palette) -> Color {
     if let Color::Rgb(r, g, b) = bg {
         let luminance = relative_luminance((r, g, b));
         let black_contrast = (luminance + 0.05) / 0.05;

@@ -101,6 +101,12 @@ pub(crate) fn render_collapsed_sidebar(
             status_icon(status, config.status_indicators),
             Style::default().fg(status_color(status, palette)),
         );
+        if selected {
+            let foreground = crate::ui::selection_fg_for_bg(selection_background, palette);
+            for x in rect.x..rect.right() {
+                buffer[(x, rect.y)].set_fg(foreground);
+            }
+        }
         hits.workspaces.push(WorkspaceHit {
             rect,
             endpoint_id: ClientEndpointId::Local,
@@ -742,9 +748,14 @@ pub(in crate::client::shell) fn render_workspace_rows(
         None
     };
     if let Some(background) = background {
+        let selection_foreground =
+            selected.then(|| crate::ui::selection_fg_for_bg(background, palette));
         for y in area.y..area.bottom() {
             for x in area.x..area.right() {
                 buffer[(x, y)].set_bg(background);
+                if let Some(foreground) = selection_foreground {
+                    buffer[(x, y)].set_fg(foreground);
+                }
             }
         }
     }

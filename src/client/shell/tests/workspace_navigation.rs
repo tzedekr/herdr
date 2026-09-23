@@ -147,6 +147,42 @@ fn local_navigation_highlight_stays_visible_with_terminal_theme() {
 }
 
 #[test]
+fn selected_workspace_text_contrasts_with_dark_background_in_light_theme() {
+    use ratatui::style::Color;
+
+    for (compact, selection_bg, expected_fg) in [
+        (false, Color::Rgb(35, 35, 35), Color::Rgb(255, 255, 255)),
+        (true, Color::Rgb(35, 35, 35), Color::Rgb(255, 255, 255)),
+        (false, Color::Rgb(189, 208, 245), Color::Rgb(0, 0, 0)),
+    ] {
+        let mut config = ClientShellConfig::from_config(&Config::default());
+        config.palette = Palette::catppuccin_latte();
+        config.palette.selection_bg = selection_bg;
+        let mut state = ClientShellState::new(config);
+        let mut projected = workspaces(2);
+        projected.workspaces[1].label = "Contrast check".into();
+        state.set_snapshot(Box::new(projected));
+        state.set_pane_surface(surface());
+        state.sidebar_collapsed = compact;
+        state.compose(100, 28).unwrap();
+        enter_navigation(&mut state);
+        preview_key(&mut state, b"\x1b[B");
+
+        let buffer = state.compose(100, 28).unwrap().to_ratatui_buffer().unwrap();
+        let selected = workspace_rect(&state, &ClientEndpointId::Local, "ws_2");
+        let cells = (selected.x..selected.right())
+            .map(|x| &buffer[(x, selected.y)])
+            .filter(|cell| !cell.symbol().trim().is_empty())
+            .collect::<Vec<_>>();
+        assert!(!cells.is_empty());
+        for cell in cells {
+            assert_eq!(cell.bg, selection_bg);
+            assert_eq!(cell.fg, expected_fg);
+        }
+    }
+}
+
+#[test]
 fn navigation_highlights_only_the_preview_and_activates_on_enter() {
     for (compact, cols) in [(true, 100), (false, 100), (false, 44)] {
         for terminal_theme in [false, true] {
